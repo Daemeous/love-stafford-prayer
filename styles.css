@@ -75,3 +75,10 @@ html, body { margin: 0; padding: 0; height: 100%; font-family: "DM Sans", system
 .organiser-edit button { margin-top: 4px; width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #ccc; background: #f5f5f5; cursor: pointer; }
 
 .error { color: #c0392b; font-size: 13px; }
+
+.poi-marker { display: flex; align-items: center; justify-content: center; }
+.poi-marker span {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.4); font-size: 15px;
+}

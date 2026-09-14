@@ -16,15 +16,21 @@
     "South West": "#f39c12",
   };
 
+  const POI_ICONS = {
+    church: "⛪", school: "🏫", care_home: "🏥", community_centre: "🏛️", custom: "📍",
+  };
+
   // ── State ──────────────────────────────────────────────────────────────
   let allRoads = [];              // parsed Data rows
   let focusByQuadrant = {};       // quadrant -> {anchor, groupCount, overrideActive, overrideStreets}
   let prayerCounts = {};          // "quadrant::week::street" -> count
   let quadrantFeatures = null;    // GeoJSON FeatureCollection
-  let map, dimLayer, highlightLayer, quadrantOutlineLayer;
+  let allPois = [];               // parsed POIs rows
+  let map, dimLayer, highlightLayer, quadrantOutlineLayer, poiLayer;
   let selectedQuadrant = QUADRANTS[0];
   let selectedWeek = 0;
   let userMarker = null;
+  let placingPoi = false;
 
   let authToken = null, authTokenType = null, authEmail = null, authAuthorised = false;
 
@@ -66,13 +72,15 @@
     const dataUrl = USING_LOCAL ? CFG.LOCAL_DATA_URL : publishedCsvUrl(CFG.DATA_GID);
     const focusUrl = USING_LOCAL ? "Focus.csv" : publishedCsvUrl(CFG.FOCUS_GID);
     const prayerUrl = USING_LOCAL ? "PrayerLog.csv" : publishedCsvUrl(CFG.PRAYERLOG_GID);
+    const poisUrl = USING_LOCAL ? "POIs.csv" : publishedCsvUrl(CFG.POIS_GID);
 
     return Promise.all([
       fetchCSV(dataUrl),
       fetchCSV(focusUrl).catch(() => []),
       fetchCSV(prayerUrl).catch(() => []),
       fetch(CFG.LOCAL_QUADRANTS_URL || "stafford_quadrants.geojson").then(r => r.json()),
-    ]).then(([dataRows, focusRows, prayerRows, geojson]) => {
+      fetchCSV(poisUrl).catch(() => []),
+    ]).then(([dataRows, focusRows, prayerRows, geojson, poiRows]) => {
       allRoads = dataRows.map(r => ({
         Street: r.Street,
         lat: parseFloat(r["@lat"]),
@@ -106,6 +114,16 @@
       });
 
       quadrantFeatures = geojson;
+
+      allPois = poiRows.map(r => ({
+        Id: r.Id,
+        Name: r.Name,
+        Type: r.Type || "custom",
+        Quadrant: r.Quadrant,
+        lat: parseFloat(r.Lat),
+        lon: parseFloat(r.Lon),
+        Notes: r.Notes || "",
+      })).filter(p => p.Id && p.Name && !isNaN(p.lat) && !isNaN(p.lon));
     });
   }
 
@@ -143,8 +161,105 @@
     dimLayer = L.layerGroup().addTo(map);
     highlightLayer = L.layerGroup().addTo(map);
     quadrantOutlineLayer = L.layerGroup().addTo(map);
+    poiLayer = L.layerGroup().addTo(map);
 
-    map.on("click", () => { if (isMobile()) closeSidebar(); });
+    map.on("click", (e) => {
+      if (placingPoi) { finishPlacingPoi(e.latlng); return; }
+      if (isMobile()) closeSidebar();
+    });
+  }
+
+  function renderPois() {
+    poiLayer.clearLayers();
+    allPois.forEach(poi => {
+      const icon = L.divIcon({
+        className: "poi-marker",
+        html: `<span>${POI_ICONS[poi.Type] || POI_ICONS.custom}</span>`,
+        iconSize: [26, 26],
+      });
+      const marker = L.marker([poi.lat, poi.lon], { icon });
+      marker.on("click", () => openPoiPopup(marker, poi));
+      marker.addTo(poiLayer);
+    });
+  }
+
+  function openPoiPopup(marker, poi) {
+    const div = document.createElement("div");
+    div.className = "road-popup";
+    renderPoiPopupContent(div, poi);
+    marker.bindPopup(div, { maxWidth: 260 }).openPopup();
+  }
+
+  function renderPoiPopupContent(div, poi) {
+    div.innerHTML = `
+      <div class="popup-title">${POI_ICONS[poi.Type] || ""} ${escapeHtml(poi.Name)}</div>
+      <div class="popup-quadrant">${escapeHtml(poi.Quadrant || "")} • ${escapeHtml(poi.Type.replace("_", " "))}</div>
+      <div class="popup-notes">${poi.Notes ? escapeHtml(poi.Notes) : "<em>No notes yet.</em>"}</div>
+      ${authAuthorised ? poiOrganiserEditHtml(poi) : ""}
+    `;
+    if (authAuthorised) wirePoiOrganiserEdit(div, poi);
+  }
+
+  function poiOrganiserEditHtml(poi) {
+    return `
+      <div class="organiser-edit">
+        <label>Notes <textarea class="edit-poi-notes">${escapeHtml(poi.Notes || "")}</textarea></label>
+        <button class="save-poi-btn">Save</button>
+        ${poi.Id.indexOf("manual-") === 0 ? '<button class="delete-poi-btn">Delete this pin</button>' : ""}
+      </div>`;
+  }
+
+  function wirePoiOrganiserEdit(div, poi) {
+    const saveBtn = div.querySelector(".save-poi-btn");
+    if (saveBtn) saveBtn.addEventListener("click", () => {
+      const notes = div.querySelector(".edit-poi-notes").value;
+      fetch(CFG.APPS_SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: "updatePoiNotes", ...authPayloadBase(), id: poi.Id, notes }),
+      }).then(r => r.json()).then(data => {
+        if (data.ok) { poi.Notes = notes; renderPoiPopupContent(div, poi); } else alert(data.error || "Save failed.");
+      });
+    });
+    const delBtn = div.querySelector(".delete-poi-btn");
+    if (delBtn) delBtn.addEventListener("click", () => {
+      if (!confirm("Delete this pin?")) return;
+      fetch(CFG.APPS_SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: "deletePoi", ...authPayloadBase(), id: poi.Id }),
+      }).then(r => r.json()).then(data => {
+        if (data.ok) { allPois = allPois.filter(p => p.Id !== poi.Id); renderPois(); map.closePopup(); }
+        else alert(data.error || "Delete failed.");
+      });
+    });
+  }
+
+  function startPlacingPoi() {
+    placingPoi = true;
+    alert("Tap anywhere on the map to place a pin.");
+  }
+
+  function finishPlacingPoi(latlng) {
+    placingPoi = false;
+    const name = window.prompt("Name for this point of interest (e.g. \"4 Prospect Road shops\"):");
+    if (!name) return;
+    const typeInput = (window.prompt('Type: church / school / care_home / community_centre / custom', "custom") || "custom").trim();
+    const type = ["church", "school", "care_home", "community_centre"].includes(typeInput) ? typeInput : "custom";
+    let quadrant = selectedQuadrant;
+    if (quadrantFeatures) {
+      const pt = turf.point([latlng.lng, latlng.lat]);
+      for (const feature of quadrantFeatures.features) {
+        if (turf.booleanPointInPolygon(pt, feature)) { quadrant = feature.properties.Quadrant; break; }
+      }
+    }
+    fetch(CFG.APPS_SCRIPT_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "addPoi", ...authPayloadBase(), name, type, quadrant, lat: latlng.lat, lon: latlng.lng }),
+    }).then(r => r.json()).then(data => {
+      if (data.ok) {
+        allPois.push({ Id: data.id, Name: name, Type: type, Quadrant: quadrant, lat: latlng.lat, lon: latlng.lng, Notes: "" });
+        renderPois();
+      } else alert(data.error || "Failed to add pin.");
+    });
   }
 
   function renderQuadrantOutlines() {
@@ -207,7 +322,7 @@
     div.innerHTML = `
       <div class="popup-title">${escapeHtml(road.Street)}</div>
       <div class="popup-quadrant">${escapeHtml(road.Quadrant)}</div>
-      <div class="popup-residences">${road.Residences ? escapeHtml(String(road.Residences)) + " homes" : "Homes: unknown"}</div>
+      <div class="popup-residences">${road.Residences ? "🏠 " + escapeHtml(String(road.Residences)) : "🏠 Unknown"}</div>
       <div class="popup-notes">${road.Notes ? escapeHtml(road.Notes) : "<em>No notes yet.</em>"}</div>
       <div class="popup-tally">Prayed for ${count} time${count === 1 ? "" : "s"} this week</div>
       <button class="pray-btn" ${already ? "disabled" : ""}>${already ? "Prayed for ✓" : "I prayed for here 🙏"}</button>
@@ -456,7 +571,7 @@
   function organiserRoadEditHtml(road) {
     return `
       <div class="organiser-edit">
-        <label>Residences <input type="number" min="0" class="edit-residences" value="${road.Residences || ""}"></label>
+        <label>What's here (e.g. "72 homes and 4 shops") <input type="text" class="edit-residences" value="${escapeHtml(road.Residences || "")}"></label>
         <label>Notes <textarea class="edit-notes">${escapeHtml(road.Notes || "")}</textarea></label>
         <button class="save-road-btn">Save</button>
       </div>`;
@@ -496,7 +611,10 @@
       <select id="focus-picker" multiple size="8">${groupsHtml}</select>
       <button id="save-focus-btn">Save as this week's focus</button>
       <button id="clear-focus-btn">Clear override (use auto-rotation)</button>
+      <h3>Points of interest</h3>
+      <button id="add-poi-btn">📍 Add a pin (church, shop, anywhere)</button>
     `;
+    document.getElementById("add-poi-btn").addEventListener("click", startPlacingPoi);
     document.getElementById("save-focus-btn").addEventListener("click", () => {
       const picked = Array.from(document.getElementById("focus-picker").selectedOptions).map(o => o.value);
       if (!picked.length) { alert("Select at least one street."); return; }
@@ -539,6 +657,7 @@
     loadAll().then(() => {
       selectedWeek = computeAutoWeek(selectedQuadrant);
       renderQuadrantOutlines();
+      renderPois();
       refreshAll();
     }).catch(err => {
       document.getElementById("street-list").innerHTML = `<p class="error">Failed to load data: ${escapeHtml(err.message)}</p>`;
