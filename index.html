@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Love Stafford Prayer Network</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=1">
+</head>
+<body>
+<script>
+// ── Per-deployment configuration ────────────────────────────────────────────
+window.PRAYER_CONFIG = {
+  SHEET_ID:  "TODO-set-after-xlsx-to-sheet-conversion",
+  DATA_GID:  "TODO",
+  FOCUS_GID: "TODO",
+  PRAYERLOG_GID: "TODO",
+  GOOGLE_CLIENT_ID: "580224381168-i67a13m72bvlpq8rtkhnjk15tic4k9e1.apps.googleusercontent.com",
+  APPS_SCRIPT_URL:  "TODO-set-after-clasp-deploy",
+  LS_SUFFIX: "stafford-prayer",
+  TITLE:    "Love Stafford",
+  SUBTITLE: "Pray for Stafford, street by street.",
+  QUADRANTS: ["North East", "North West", "South East", "South West"],
+  WEEK_COUNT: 10,
+  INITIAL_VIEW: [52.8026, -2.1146],
+  INITIAL_ZOOM: 13,
+  // Local dev fallback: when SHEET_ID is still a TODO, core.js loads these
+  // local files instead of published Sheet CSVs, so the app can be tested
+  // before deployment.
+  LOCAL_DATA_URL: "Stafford_Prayer_Data.csv",
+  LOCAL_QUADRANTS_URL: "stafford_quadrants.geojson"
+};
+</script>
+<!-- External libraries -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+<script src="https://accounts.google.com/gsi/client"></script>
+<script src="core.js?v=1"></script>
+</body>
+</html>
