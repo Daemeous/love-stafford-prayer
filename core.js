@@ -178,16 +178,19 @@
         iconSize: [26, 26],
       });
       const marker = L.marker([poi.lat, poi.lon], { icon });
-      marker.on("click", () => openPoiPopup(marker, poi));
+      // Bind ONCE with a content function (Leaflet calls it fresh on every
+      // open) rather than calling bindPopup() again inside a click handler —
+      // doing both attaches two competing click listeners (ours, plus the
+      // one bindPopup itself registers), which made the second click net
+      // out to an immediate open-then-close, looking like "only opens once".
+      marker.bindPopup(() => {
+        const div = document.createElement("div");
+        div.className = "road-popup";
+        renderPoiPopupContent(div, poi);
+        return div;
+      }, { maxWidth: 260 });
       marker.addTo(poiLayer);
     });
-  }
-
-  function openPoiPopup(marker, poi) {
-    const div = document.createElement("div");
-    div.className = "road-popup";
-    renderPoiPopupContent(div, poi);
-    marker.bindPopup(div, { maxWidth: 260 }).openPopup();
   }
 
   function renderPoiPopupContent(div, poi) {
@@ -303,17 +306,22 @@
   }
 
   function bindRoadPopup(layer, road, isFocus) {
-    layer.on("click", (e) => {
-      L.DomEvent.stopPropagation(e);
-      openRoadPopup(layer, road);
-    });
-  }
-
-  function openRoadPopup(layer, road) {
-    const div = document.createElement("div");
-    div.className = "road-popup";
-    renderPopupContent(div, road);
-    layer.bindPopup(div, { maxWidth: 280 }).openPopup();
+    // Bind ONCE with a content function (called fresh by Leaflet on every
+    // open) instead of calling bindPopup() again inside a click handler —
+    // doing both attaches two competing click listeners (ours, plus the one
+    // bindPopup itself registers), which made a second click on the same
+    // road net out to an immediate open-then-close ("only opens once").
+    // Leaflet already opens a bound popup on click by itself, so the only
+    // thing our own click listener needs to do is stop the click reaching
+    // the map (which would otherwise also fire the mobile close-sidebar
+    // handler at the same time).
+    layer.bindPopup(() => {
+      const div = document.createElement("div");
+      div.className = "road-popup";
+      renderPopupContent(div, road);
+      return div;
+    }, { maxWidth: 280 });
+    layer.on("click", (e) => L.DomEvent.stopPropagation(e));
   }
 
   function renderPopupContent(div, road) {
